@@ -1,4 +1,3 @@
-// internal/service/rss/parser.go
 package rss
 
 import (
@@ -50,6 +49,8 @@ func NewParser() *Parser {
 }
 
 func (p *Parser) FetchNews(ctx context.Context, feedURL string) ([]models.NewsItem, error) {
+	logger.Debug("Fetching news from %s", feedURL)
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -84,14 +85,14 @@ func (p *Parser) processItems(items []Item) ([]models.NewsItem, error) {
 
 	var newsItems []models.NewsItem
 
-	// Process only the latest item if it's the first fetch
 	if p.firstFetch && len(items) > 0 {
-		latestItem := items[0] // First item is the newest
+		latestItem := items[0]
 		pubDate, err := time.Parse(time.RFC1123Z, strings.TrimSpace(latestItem.PubDate))
 		if err != nil {
 			return nil, fmt.Errorf("parse date for latest item: %w", err)
 		}
 
+		logger.Info("First fetch: Latest article from %v", pubDate)
 		p.lastNewsTime = pubDate
 		p.firstFetch = false
 
@@ -99,7 +100,6 @@ func (p *Parser) processItems(items []Item) ([]models.NewsItem, error) {
 		return []models.NewsItem{newsItem}, nil
 	}
 
-	// For subsequent fetches, check for newer items
 	for _, item := range items {
 		pubDate, err := time.Parse(time.RFC1123Z, strings.TrimSpace(item.PubDate))
 		if err != nil {
@@ -107,18 +107,19 @@ func (p *Parser) processItems(items []Item) ([]models.NewsItem, error) {
 			continue
 		}
 
-		// Break if we hit an old item
 		if !pubDate.After(p.lastNewsTime) {
+			logger.Debug("No newer articles found after %v", p.lastNewsTime)
 			break
 		}
 
+		logger.Info("Found new article from %v", pubDate)
 		newsItem := p.convertItemToNews(item, pubDate)
 		newsItems = append(newsItems, newsItem)
 	}
 
-	// Update last news time if we found new items
 	if len(newsItems) > 0 {
 		p.lastNewsTime = newsItems[0].PubDate
+		logger.Info("Updated last news time to %v", p.lastNewsTime)
 	}
 
 	return newsItems, nil
@@ -129,7 +130,7 @@ func (p *Parser) convertItemToNews(item Item, pubDate time.Time) models.NewsItem
 		Title:       cleanCDATA(item.Title),
 		Link:        item.GUID,
 		PubDate:     pubDate,
-		Description: extractLastParagraph(item.Description),
+		Description: extractDescription(item.Description),
 		Categories:  cleanCategories(item.Categories),
 	}
 }
@@ -141,19 +142,40 @@ func cleanCDATA(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func extractLastParagraph(description string) string {
-	startIdx := strings.LastIndex(description, "<p>")
-	if startIdx == -1 {
-		return cleanCDATA(description)
+func extractDescription(description string) string {
+	// Remove any HTML styling
+	description = strings.ReplaceAll(description, `style="float:right; margin:0 0 10px 15px; width:240px;"`, "")
+
+	// Remove image tags
+	imgStart := strings.Index(description, "<img")
+	if imgStart != -1 {
+		imgEnd := strings.Index(description[imgStart:], ">")
+		if imgEnd != -1 {
+			description = description[:imgStart] + description[imgStart+imgEnd+1:]
+		}
 	}
 
-	endIdx := strings.Index(description[startIdx:], "</p>")
-	if endIdx == -1 {
-		return cleanCDATA(description[startIdx+3:])
+	// Extract text from p tags
+	pStart := strings.Index(description, "<p>")
+	if pStart != -1 {
+		pEnd := strings.Index(description[pStart:], "</p>")
+		if pEnd != -1 {
+			description = description[pStart+3 : pStart+pEnd]
+		}
 	}
 
-	text := description[startIdx+3 : startIdx+endIdx]
-	return strings.TrimSpace(text)
+	// Clean CDATA and trim
+	description = cleanCDATA(description)
+
+	// Replace problematic characters
+	description = strings.ReplaceAll(description, `“`, `"`)
+	description = strings.ReplaceAll(description, `”`, `"`)
+	description = strings.ReplaceAll(description, "'", "'")
+	description = strings.ReplaceAll(description, "'", "'")
+	description = strings.ReplaceAll(description, "–", "-")
+	description = strings.ReplaceAll(description, "…", "...")
+
+	return strings.TrimSpace(description)
 }
 
 func cleanCategories(categories []string) []string {

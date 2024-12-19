@@ -1,4 +1,3 @@
-// internal/config/config.go
 package config
 
 import (
@@ -11,19 +10,13 @@ import (
 )
 
 type Config struct {
-	// Telegram Configuration
-	TelegramToken string
-
-	// RSS Configuration
+	TelegramToken  string
 	RSSFeedURL     string
 	UpdateInterval time.Duration
-
-	// Logger Configuration
-	LogLevel    logger.Level
-	LogFilePath string
+	LogLevel       logger.Level
+	LogFilePath    string
 }
 
-// Load reads the configuration from environment variables
 func Load() (*Config, error) {
 	if err := godotenv.Load(); err != nil {
 		return nil, fmt.Errorf("error loading .env file: %w", err)
@@ -31,7 +24,6 @@ func Load() (*Config, error) {
 
 	cfg := &Config{}
 
-	// Required configurations
 	cfg.TelegramToken = os.Getenv("TELEGRAM_TOKEN")
 	if cfg.TelegramToken == "" {
 		return nil, fmt.Errorf("TELEGRAM_TOKEN is required")
@@ -39,20 +31,18 @@ func Load() (*Config, error) {
 
 	cfg.RSSFeedURL = os.Getenv("RSS_FEED_URL")
 	if cfg.RSSFeedURL == "" {
-		cfg.RSSFeedURL = "https://cointelegraph.com/rss" // default value
+		cfg.RSSFeedURL = "https://cointelegraph.com/rss"
 	}
 
-	// Optional configurations with defaults
-	cfg.UpdateInterval = getEnvDuration("UPDATE_INTERVAL", 1*time.Minute)
+	// Changed default interval to 5 seconds
+	cfg.UpdateInterval = getEnvDuration("UPDATE_INTERVAL", 5*time.Second)
 	cfg.LogLevel = getEnvLogLevel("LOG_LEVEL", logger.InfoLevel)
 	cfg.LogFilePath = os.Getenv("LOG_FILE")
 
-	// Initialize logger
 	if err := initLogger(cfg); err != nil {
 		return nil, fmt.Errorf("failed to initialize logger: %w", err)
 	}
 
-	// Log configuration
 	logConfig(cfg)
 
 	return cfg, nil
